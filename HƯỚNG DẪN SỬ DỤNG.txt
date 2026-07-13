@@ -1,0 +1,49 @@
+
+=============================================
+HƯỚNG DẪN SỬ DỤNG TOOL TRÍCH XUẤT DỮ LIỆU TỪ ẢNH
+=============================================
+
+I. CÀI ĐẶT TRÊN MÁY MỚI
+-------------------------
+
+1. Cài đặt Python
+   - Truy cập: https://www.python.org/downloads/
+   - Tải và cài đặt phiên bản Python mới nhất
+   - QUAN TRỌNG: Trong quá trình cài đặt, nhớ tích chọn "Add Python to PATH"
+
+2. Cài đặt Tesseract OCR
+   - Truy cập: https://github.com/UB-Mannheim/tesseract/wiki
+   - Tải file cài đặt mới nhất (ví dụ: tesseract-ocr-w64-setup-v5.x.x.exe)
+   - Cài đặt vào thư mục mặc định: C:\Program Files\Tesseract-OCR
+
+3. Cài đặt các thư viện Python
+   - Mở PowerShell (hoặc Command Prompt)
+   - Di chuyển đến thư mục chứa tool (ví dụ: cd D:\dke\code)
+   - Chạy lệnh: pip install -r requirements.txt
+
+II. SỬ DỤNG TOOL
+-----------------
+
+1. Chuẩn bị ảnh
+   - Đặt tất cả ảnh PNG vào một thư mục (ví dụ: D:\dke\10090-12)
+   - Tên ảnh phải có định dạng: ..._caseX_TY_... (ví dụ: 2026_07_11_09_10_05_11_case01_T0_P0.png)
+     - caseX: số thứ tự case
+     - TY: giá trị T (T0, T2, T4,...)
+
+2. Cấu hình đường dẫn
+   - Mở file extract_data_final.py bằng Notepad hoặc trình chỉnh sửa code
+   - Sửa các biến ở đầu file:
+     - INPUT_DIR: đường dẫn thư mục chứa ảnh
+     - OUTPUT_FILE: đường dẫn file Excel đầu ra
+     - TESSERACT_PATH: đường dẫn đến tesseract.exe (nếu không cài ở thư mục mặc định)
+
+3. Chạy tool
+   - Mở PowerShell, di chuyển đến thư mục chứa tool
+   - Chạy lệnh: python extract_data_final.py
+   - Kết quả sẽ được lưu vào file Excel bạn đã cấu hình
+
+III. LƯU Ý
+-----------
+- Đóng file Excel trước khi chạy tool (nếu không sẽ bị lỗi)
+- Nếu ảnh có định dạng khác (không phải PNG), sửa dòng: if filename.lower().endswith('.png') thành định dạng tương ứng
+- Nếu tool không đọc đúng dữ liệu, bạn có thể cần điều chỉnh các bbox (vùng cắt ảnh) trong hàm extract_values_from_image
