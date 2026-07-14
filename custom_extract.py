@@ -11,26 +11,35 @@ from collections import defaultdict
 # Configuration
 TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 IMAGE_DIR = r"D:\dke\10090-12"
-OUTPUT_FILE = r"D:\dke\code\extracted_data_complete.xlsx"
+OUTPUT_FILE = r"D:\dke\code\extracted_data_final_v8.xlsx"
 
-def ocr_image(image_path):
-    """Run OCR on an image using Tesseract via stdin."""
-    img = Image.open(image_path)
+def ocr_region(img, bbox, config='--psm 6'):
+    """Run OCR on a specific region of the image via stdin to Tesseract"""
+    cropped = img.crop(bbox)
+    gray = cropped.convert('L')
     buf = BytesIO()
-    img.save(buf, format="PNG")
+    gray.save(buf, format='PNG')
     buf.seek(0)
     
     result = subprocess.run(
-        [TESSERACT_PATH, "stdin", "stdout"],
+        [TESSERACT_PATH, "stdin", "stdout", *config.split()],
         input=buf.read(),
         capture_output=True
     )
-    
-    text = result.stdout.decode("utf-8", errors="replace")
-    return text
+    return result.stdout.decode('utf-8', errors='replace').strip()
 
-def extract_values(ocr_text):
-    """Extract Delta_t, Maximum, Mean, RMS from OCR text using regex."""
+def clean_number(s):
+    """Clean number string (replace comma with dot, strip extra dots)"""
+    try:
+        s = s.replace(',', '.').strip('.')
+        if not s:  # Skip empty strings
+            return None
+        return float(s)
+    except ValueError:
+        return None
+
+def extract_values_from_image(image_path):
+    """Extract Delta_t, Maximum, Mean, RMS from image using region-based OCR"""
     values = {
         "Delta_t": None,
         "Maximum": None,
@@ -38,113 +47,137 @@ def extract_values(ocr_text):
         "RMS": None
     }
     
-    callout_idx = ocr_text.lower().find("callout")
-    meas1_idx = ocr_text.lower().find("meas 1")
-    meas2_idx = ocr_text.lower().find("meas 2")
-    meas3_idx = ocr_text.lower().find("meas 3")
-    
-    if meas1_idx == -1:
-        meas1_idx = len(ocr_text)
-    if meas2_idx == -1:
-        meas2_idx = len(ocr_text)
-    if meas3_idx == -1:
-        meas3_idx = len(ocr_text)
-    
-    # -------------------------- DELTA_T --------------------------
-    # Priority 1: Look anywhere in ocr_text for t: XXXXX s
-    t_pattern = re.compile(r"t[:\s]*(\d+\.\d+)\s*s", re.IGNORECASE)
-    t_match = t_pattern.search(ocr_text)
-    if t_match:
-        try:
-            val = float(t_match.group(1))
-            if val < 100:
-                # Check if this number is not near Aa/At
-                match_start = t_match.start()
-                context = ocr_text[max(0, match_start - 40):match_start]
-                if "aa/at" not in context.lower():
-                    values["Delta_t"] = val
-        except ValueError:
-            pass
-    # Priority 2: Look for At: XXXXX anywhere, skip near Aa/At
-    if values["Delta_t"] is None:
-        at_pattern = re.compile(r"At[:\s]*(\d+\.\d+)", re.IGNORECASE)
-        at_matches = list(at_pattern.finditer(ocr_text))
-        for at_match in at_matches:
-            try:
-                val = float(at_match.group(1))
-                if val < 100:
-                    match_start = at_match.start()
-                    context = ocr_text[max(0, match_start - 40):match_start]
-                    if "aa/at" not in context.lower():
-                        values["Delta_t"] = val
+    try:
+        img = Image.open(image_path)
+        width, height = img.size
+        
+        # Bounding boxes - expanded delta_t region
+        delta_t_bbox = (0, 0, 1920, 400)  # Larger area for delta_t
+        meas_bbox = (1500, 120, 1920, 650)
+        
+        # OCR on regions
+        delta_t_text = ocr_region(img, delta_t_bbox, config='--psm 12')
+        meas_text = ocr_region(img, meas_bbox, config='--psm 6')
+        
+        # Extract Delta_t - FIRST prioritize "At:" or "Δt:" (delta t), but NOT in "Aa/At", "1/At", "W/At", etc.
+        # Also avoid "WAt:" which is the frequency
+        import re
+        # Split into lines first to make it easier
+        lines = delta_t_text.splitlines()
+        for line in lines:
+            line = line.strip()
+            # Skip any line with "Aa/At", "1/At", "W/At", "At:", followed by "mHz" or "Hz"
+            if any(x in line.lower() for x in ['aa/at', '1/at', 'w/at', '(', 'wat:', '/at']):
+                continue
+            # Look for "At:" or "Δt:" in this line
+            match = re.search(r'(?:[Δ∆]t|At)[:\s]*[^\d]*([\d.,]+)', line, re.IGNORECASE)
+            if match:
+                num_str = match.group(1)
+                num = clean_number(num_str)
+                if num is not None and num > 1:
+                    # Also check that this line doesn't have "mHz" or "Hz"
+                    if 'mhz' not in line.lower() and 'hz' not in line.lower():
+                        values['Delta_t'] = num
                         break
-            except ValueError:
-                pass
+        if not values['Delta_t']:
+            # Then prioritize values near standalone "t:" or "t "
+            for t_match in re.finditer(r'\bt[:\s]+[^\d]*([\d.,]+)', delta_t_text, re.IGNORECASE):
+                num_str = t_match.group(1)
+                num = clean_number(num_str)
+                if num is not None and num > 0:  # Skip negative numbers
+                    match_start, match_end = t_match.span()
+                    # Check before for "at"
+                    context_before = delta_t_text[max(0, match_start - 15):match_start].lower()
+                    # Check if right after the number there's an "s"
+                    right_after = delta_t_text[match_end:match_end + 5].lower().strip()
+                    # Check right after for "ms", "hz", "mhz"
+                    context_after = delta_t_text[match_end:match_end + 15].lower()
+                    if (
+                        'at' not in context_before and
+                        (right_after.startswith('s') or ('ms' not in context_after and 'hz' not in context_after and 'mhz' not in context_after))
+                    ):
+                        values['Delta_t'] = num
+                        break
+        if not values['Delta_t']:
+            # Fallback to other s values, skip near bad words
+            for match in re.finditer(r'([\d.,]+)\s*s', delta_t_text, re.IGNORECASE):
+                num_str = match.group(1)
+                match_start, match_end = match.span()
+                context_before = delta_t_text[max(0, match_start - 20):match_start].lower()
+                context_after = delta_t_text[match_end:match_end + 20].lower()
+                if (
+                    'at' not in context_before and
+                    'ms' not in context_after and
+                    'hz' not in context_after and
+                    'mhz' not in context_after
+                ):
+                    num = clean_number(num_str)
+                    if num is not None and num > 0:
+                        values['Delta_t'] = num
+                        break
+        # If still not found, try numbers in reasonable range
+        if not values['Delta_t']:
+            for match in re.finditer(r'[\d.,]+', delta_t_text):
+                num_str = match.group(0)
+                num = clean_number(num_str)
+                if num is not None and 1 < num < 1000:
+                    match_start, match_end = match.span()
+                    context_before = delta_t_text[max(0, match_start - 20):match_start].lower()
+                    context_after = delta_t_text[match_end:match_end + 20].lower()
+                    if (
+                        '#' not in context_before + context_after and
+                        'ms' not in context_after and
+                        'hz' not in context_after and
+                        'mhz' not in context_after and
+                        'at' not in context_before
+                    ):
+                        if '.' in num_str or ',' in num_str:
+                            values['Delta_t'] = num
+                            break
+            if not values['Delta_t']:
+                for match in re.finditer(r'[\d.,]+', delta_t_text):
+                    num_str = match.group(0)
+                    num = clean_number(num_str)
+                    if num is not None and 1 < num < 1000:
+                        match_start, match_end = match.span()
+                        context_before = delta_t_text[max(0, match_start - 20):match_start].lower()
+                        context_after = delta_t_text[match_end:match_end + 20].lower()
+                        if (
+                            '#' not in context_before + context_after and
+                            'ms' not in context_after and
+                            'hz' not in context_after and
+                            'mhz' not in context_after and
+                            'at' not in context_before
+                        ):
+                            values['Delta_t'] = num
+                            break
+        
+        # Extract Maximum, Mean, RMS
+        max_match = re.search(r'Maximum[^\d]*([\d.,]+)', meas_text, re.IGNORECASE)
+        if max_match:
+            num = clean_number(max_match.group(1))
+            if num is not None:
+                values['Maximum'] = num
+        
+        mean_match = re.search(r'Mean[^\d]*([\d.,]+)', meas_text, re.IGNORECASE)
+        if mean_match:
+            num = clean_number(mean_match.group(1))
+            if num is not None:
+                values['Mean'] = num
+        
+        rms_match = re.search(r'RMS[^\d]*([\d.,]+)', meas_text, re.IGNORECASE)
+        if rms_match:
+            num = clean_number(rms_match.group(1))
+            if num is not None:
+                values['RMS'] = num
     
-    # -------------------------- MAXIMUM --------------------------
-    max_section = ocr_text[meas1_idx:]
-    max_pattern = re.compile(r"(?:Maximum|Max).*?(\d+\.\d+)", re.IGNORECASE | re.DOTALL)
-    max_matches = max_pattern.findall(max_section)
-    for match in max_matches:
-        try:
-            val = float(match)
-            if val > 5:  # Skip measurement index 1,2,3
-                values["Maximum"] = val
-                break
-        except ValueError:
-            pass
-    
-    # -------------------------- MEAN --------------------------
-    mean_section = ocr_text[meas2_idx:meas3_idx]
-    mean_num_pattern = re.compile(r"(\d+\.\d+)")
-    mean_num_matches = mean_num_pattern.findall(mean_section)
-    for match in mean_num_matches:
-        try:
-            val = float(match)
-            if 0.5 < val < 5:
-                values["Mean"] = val
-                break
-        except ValueError:
-            pass
-    if values["Mean"] is None:
-        u_pattern = re.compile(r"u['\"]?(\d+\.\d+)", re.IGNORECASE)
-        u_match = u_pattern.search(mean_section)
-        if u_match:
-            try:
-                val = float(u_match.group(1))
-                if 0.5 < val <5:
-                    values["Mean"] = val
-            except ValueError:
-                pass
-    
-    # -------------------------- RMS --------------------------
-    rms_section = ocr_text[meas3_idx:]
-    rms_pattern = re.compile(r"(?:RMS|rms|RIMS|Hy\s*RIMS).*?(\d+\.\d+)", re.IGNORECASE | re.DOTALL)
-    rms_matches = rms_pattern.findall(rms_section)
-    for match in rms_matches:
-        try:
-            val = float(match)
-            if 0.5 < val < 5:
-                values["RMS"] = val
-                break
-        except ValueError:
-            pass
-    if values["RMS"] is None:
-        rms_num_pattern = re.compile(r"(\d+\.\d+)")
-        rms_num_matches = rms_num_pattern.findall(rms_section)
-        for match in rms_num_matches:
-            try:
-                val = float(match)
-                if 0.5 < val <5:
-                    values["RMS"] = val
-                    break
-            except ValueError:
-                pass
+    except Exception as e:
+        print(f"Error processing {image_path}: {e}")
     
     return values
 
 def parse_filename(filename):
-    """Extract case number and sheet name from filename."""
+    """Extract case number and sheet name from filename"""
     case_match = re.search(r"case(\d+)", filename)
     sheet_match = re.search(r"_(T\d+)_", filename)
     
@@ -154,7 +187,7 @@ def parse_filename(filename):
     return case, sheet
 
 def get_sheet_number(sheet_name):
-    """Extract the numeric part from sheet name (e.g., T0 → 0, T2 → 2)"""
+    """Extract numeric part from sheet name (e.g., T0 → 0)"""
     match = re.search(r"T(\d+)", sheet_name)
     if match:
         return int(match.group(1))
@@ -176,8 +209,7 @@ def main():
         image_path = os.path.join(IMAGE_DIR, filename)
         
         try:
-            ocr_text = ocr_image(image_path)
-            values = extract_values(ocr_text)
+            values = extract_values_from_image(image_path)
             case, sheet = parse_filename(filename)
             all_data.append({
                 "Case": case,
