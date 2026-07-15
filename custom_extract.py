@@ -11,7 +11,7 @@ from collections import defaultdict
 # Configuration
 TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 IMAGE_DIR = r"D:\dke\10090-12"
-OUTPUT_FILE = r"D:\dke\code\extracted_data_final_v8.xlsx"
+OUTPUT_FILE = r"D:\dke\code\extracted_data_final_v9.xlsx"
 
 def ocr_region(img, bbox, config='--psm 6'):
     """Run OCR on a specific region of the image via stdin to Tesseract"""
@@ -29,12 +29,13 @@ def ocr_region(img, bbox, config='--psm 6'):
     return result.stdout.decode('utf-8', errors='replace').strip()
 
 def clean_number(s):
-    """Clean number string (replace comma with dot, strip extra dots)"""
+    """Clean number string (replace comma with dot, strip extra dots) and round to 3 decimal places"""
     try:
         s = s.replace(',', '.').strip('.')
         if not s:  # Skip empty strings
             return None
-        return float(s)
+        num = float(s)
+        return round(num, 3)
     except ValueError:
         return None
 
@@ -69,8 +70,8 @@ def extract_values_from_image(image_path):
             # Skip any line with "Aa/At", "1/At", "W/At", "At:", followed by "mHz" or "Hz"
             if any(x in line.lower() for x in ['aa/at', '1/at', 'w/at', '(', 'wat:', '/at']):
                 continue
-            # Look for "At:" or "Δt:" in this line
-            match = re.search(r'(?:[Δ∆]t|At)[:\s]*[^\d]*([\d.,]+)', line, re.IGNORECASE)
+            # Look for "At:" or "Δt:" in this line - capture up to 3 decimals
+            match = re.search(r'(?:[Δ∆]t|At)[:\s]*[^\d]*(\d+(?:[.,]\d{1,3})?)', line, re.IGNORECASE)
             if match:
                 num_str = match.group(1)
                 num = clean_number(num_str)
@@ -80,8 +81,8 @@ def extract_values_from_image(image_path):
                         values['Delta_t'] = num
                         break
         if not values['Delta_t']:
-            # Then prioritize values near standalone "t:" or "t "
-            for t_match in re.finditer(r'\bt[:\s]+[^\d]*([\d.,]+)', delta_t_text, re.IGNORECASE):
+            # Then prioritize values near standalone "t:" or "t " - capture up to 3 decimals
+            for t_match in re.finditer(r'\bt[:\s]+[^\d]*(\d+(?:[.,]\d{1,3})?)', delta_t_text, re.IGNORECASE):
                 num_str = t_match.group(1)
                 num = clean_number(num_str)
                 if num is not None and num > 0:  # Skip negative numbers
@@ -99,8 +100,8 @@ def extract_values_from_image(image_path):
                         values['Delta_t'] = num
                         break
         if not values['Delta_t']:
-            # Fallback to other s values, skip near bad words
-            for match in re.finditer(r'([\d.,]+)\s*s', delta_t_text, re.IGNORECASE):
+            # Fallback to other s values, skip near bad words - capture up to 3 decimals
+            for match in re.finditer(r'(\d+(?:[.,]\d{1,3})?)\s*s', delta_t_text, re.IGNORECASE):
                 num_str = match.group(1)
                 match_start, match_end = match.span()
                 context_before = delta_t_text[max(0, match_start - 20):match_start].lower()
@@ -115,10 +116,10 @@ def extract_values_from_image(image_path):
                     if num is not None and num > 0:
                         values['Delta_t'] = num
                         break
-        # If still not found, try numbers in reasonable range
+        # If still not found, try numbers in reasonable range - capture up to 3 decimals
         if not values['Delta_t']:
-            for match in re.finditer(r'[\d.,]+', delta_t_text):
-                num_str = match.group(0)
+            for match in re.finditer(r'(\d+(?:[.,]\d{1,3})?)', delta_t_text):
+                num_str = match.group(1)
                 num = clean_number(num_str)
                 if num is not None and 1 < num < 1000:
                     match_start, match_end = match.span()
@@ -135,8 +136,8 @@ def extract_values_from_image(image_path):
                             values['Delta_t'] = num
                             break
             if not values['Delta_t']:
-                for match in re.finditer(r'[\d.,]+', delta_t_text):
-                    num_str = match.group(0)
+                for match in re.finditer(r'(\d+(?:[.,]\d{1,3})?)', delta_t_text):
+                    num_str = match.group(1)
                     num = clean_number(num_str)
                     if num is not None and 1 < num < 1000:
                         match_start, match_end = match.span()
@@ -152,20 +153,20 @@ def extract_values_from_image(image_path):
                             values['Delta_t'] = num
                             break
         
-        # Extract Maximum, Mean, RMS
-        max_match = re.search(r'Maximum[^\d]*([\d.,]+)', meas_text, re.IGNORECASE)
+        # Extract Maximum, Mean, RMS - capture up to 3 decimals
+        max_match = re.search(r'Maximum[^\d]*(\d+(?:[.,]\d{1,3})?)', meas_text, re.IGNORECASE)
         if max_match:
             num = clean_number(max_match.group(1))
             if num is not None:
                 values['Maximum'] = num
         
-        mean_match = re.search(r'Mean[^\d]*([\d.,]+)', meas_text, re.IGNORECASE)
+        mean_match = re.search(r'Mean[^\d]*(\d+(?:[.,]\d{1,3})?)', meas_text, re.IGNORECASE)
         if mean_match:
             num = clean_number(mean_match.group(1))
             if num is not None:
                 values['Mean'] = num
         
-        rms_match = re.search(r'RMS[^\d]*([\d.,]+)', meas_text, re.IGNORECASE)
+        rms_match = re.search(r'RMS[^\d]*(\d+(?:[.,]\d{1,3})?)', meas_text, re.IGNORECASE)
         if rms_match:
             num = clean_number(rms_match.group(1))
             if num is not None:
@@ -243,13 +244,13 @@ def main():
         filled = data.copy()
         
         if filled["Delta_t"] is None and len(group_values[key]["Delta_t"]) > 0:
-            filled["Delta_t"] = round(mean(group_values[key]["Delta_t"]), 4)
+            filled["Delta_t"] = round(mean(group_values[key]["Delta_t"]), 3)
         if filled["Maximum"] is None and len(group_values[key]["Maximum"]) > 0:
-            filled["Maximum"] = round(mean(group_values[key]["Maximum"]), 4)
+            filled["Maximum"] = round(mean(group_values[key]["Maximum"]), 3)
         if filled["Mean"] is None and len(group_values[key]["Mean"]) > 0:
-            filled["Mean"] = round(mean(group_values[key]["Mean"]), 4)
+            filled["Mean"] = round(mean(group_values[key]["Mean"]), 3)
         if filled["RMS"] is None and len(group_values[key]["RMS"]) > 0:
-            filled["RMS"] = round(mean(group_values[key]["RMS"]), 4)
+            filled["RMS"] = round(mean(group_values[key]["RMS"]), 3)
         
         filled_data.append(filled)
     

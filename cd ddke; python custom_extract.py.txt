@@ -1,0 +1,2 @@
+cd D:\dke
+python custom_extract.py
