@@ -7,11 +7,15 @@ import pandas as pd
 from io import BytesIO
 from statistics import mean
 from collections import defaultdict
+from openpyxl import load_workbook
+from openpyxl.drawing.image import Image as ExcelImage
 
-# Configuration
+# Configuration - use relative paths for portability
 TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-IMAGE_DIR = r"D:\dke\10090-12"
-OUTPUT_FILE = r"D:\dke\code\extracted_data_final_v9.xlsx"
+# Get current directory of the script
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+IMAGE_DIR = os.path.join(SCRIPT_DIR, "10090-12")
+OUTPUT_FILE = os.path.join(SCRIPT_DIR, "code", "extracted_data_final_v9.xlsx")
 
 def ocr_region(img, bbox, config='--psm 6'):
     """Run OCR on a specific region of the image via stdin to Tesseract"""
@@ -271,7 +275,94 @@ def main():
             df = pd.DataFrame(data_sorted)
             df.to_excel(writer, sheet_name=sheet, index=False)
     
+    # Now add the 'img' sheet with 20 images
+    add_img_sheet(OUTPUT_FILE, IMAGE_DIR)
+    
     print(f"Done! Data saved to {OUTPUT_FILE}")
+
+def add_img_sheet(excel_path, image_dir):
+    """Add 'img' sheet after T40 with 20 images arranged in grid"""
+    print("Adding img sheet...")
+    wb = load_workbook(excel_path)
+    
+    # Define temperature to sheet mapping
+    temp_map = {
+        "0C": "T0",
+        "10C": "T10",
+        "25C": "T28",
+        "40C": "T40"
+    }
+    
+    # Collect images for each temperature (5 each)
+    temp_images = {}
+    all_image_files = [f for f in os.listdir(image_dir) if f.lower().endswith(".png")]
+    all_image_files.sort()
+    
+    for temp, sheet_name in temp_map.items():
+        # Get first 5 images for this sheet
+        matching_images = []
+        for f in all_image_files:
+            if f"_{sheet_name}_" in f:
+                matching_images.append(f)
+                if len(matching_images) == 5:
+                    break
+        temp_images[temp] = matching_images[:5]
+        print(f"  {temp}: {len(temp_images[temp])} images")
+    
+    # Create 'img' sheet after T40
+    if "img" in wb.sheetnames:
+        del wb["img"]
+    
+    # Insert 'img' sheet after T40
+    t40_index = None
+    for i, sheet_name in enumerate(wb.sheetnames):
+        if sheet_name == "T40":
+            t40_index = i
+            break
+    
+    print(f"  Inserting img sheet at index: {t40_index + 1 if t40_index is not None else len(wb.sheetnames)}")
+    img_sheet = wb.create_sheet(title="img", index=t40_index + 1 if t40_index is not None else len(wb.sheetnames))
+    
+    # Arrange images: 4 rows (temperatures) × 5 columns
+    # Image size in Excel (adjust as needed)
+    img_width = 300  # pixels (make them bigger to see clearly)
+    img_height = 200  # pixels
+    row_height = 150
+    col_width = 40
+    
+    # Set row heights and column widths
+    for row in range(1, 5):
+        img_sheet.row_dimensions[row].height = row_height
+    for col in range(1, 7):  # Columns A-F
+        img_sheet.column_dimensions[chr(64 + col)].width = col_width
+    
+    # Add images to sheet
+    temps = list(temp_map.keys())  # ["0C", "10C", "25C", "40C"]
+    total_images_added = 0
+    for row_idx, temp in enumerate(temps, 1):
+        images = temp_images[temp]
+        for col_idx, img_file in enumerate(images, 1):
+            img_path = os.path.join(image_dir, img_file)
+            if os.path.exists(img_path):
+                # Add temperature label in first column (A)
+                if col_idx == 1:
+                    img_sheet.cell(row=row_idx, column=1, value=temp)
+                    img_sheet.cell(row=row_idx, column=1).font = img_sheet.cell(row=row_idx, column=1).font.copy(bold=True, size=14)
+                
+                # Add image - start from column B (index 2)
+                excel_img = ExcelImage(img_path)
+                # Resize image
+                excel_img.width = img_width
+                excel_img.height = img_height
+                # Anchor to cell (columns B-F for images)
+                cell_anchor = f"{chr(64 + col_idx + 1)}{row_idx}"
+                img_sheet.add_image(excel_img, cell_anchor)
+                total_images_added += 1
+    
+    print(f"  Added {total_images_added} images to img sheet")
+    # Save the workbook
+    wb.save(excel_path)
+    print("  Saved workbook with img sheet!")
 
 if __name__ == "__main__":
     main()
