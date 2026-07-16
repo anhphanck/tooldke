@@ -20,11 +20,22 @@ OUTPUT_FILE = os.path.join(PROJECT_ROOT, "code", "extracted_data_final_v9.xlsx")
 # Create output directory if it doesn't exist
 os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
 
-# Temperature to sheet mapping
+# Temperature to sheet mapping: map all T numbers to appropriate sheets
 TEMP_SHEET_MAP = {
+    # 0°C: T0-T8
     "T0": "0C",
+    "T2": "0C",
+    "T4": "0C",
+    "T6": "0C",
+    "T8": "0C",
+    # 10°C: T10-T22
     "T10": "10C",
-    "T28": "25C",  # T28 maps to 25C
+    "T18": "10C",
+    "T22": "10C",
+    # 25°C: T28-T32
+    "T28": "25C",
+    "T32": "25C",
+    # 40°C: T40
     "T40": "40C"
 }
 
