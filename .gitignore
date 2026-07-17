@@ -1,0 +1,21 @@
+
+# Excel files (generated)
+*.xlsx
+*.xls
+~$*.xlsx
+
+# Images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS files
+.DS_Store
+Thumbs.db
