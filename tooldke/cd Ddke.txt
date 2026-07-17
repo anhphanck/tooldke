@@ -1,2 +1,0 @@
-cd Ddke
-python custom_extract.py

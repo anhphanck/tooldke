@@ -4,7 +4,9 @@
 *.xls
 ~$*.xlsx
 
-# Images
+# Images and generated files
+tooldke/10090-12/
+tooldke/code/
 *.png
 *.jpg
 *.jpeg
