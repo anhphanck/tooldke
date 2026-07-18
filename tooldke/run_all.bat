@@ -1,11 +1,11 @@
 
 @echo off
-cd /d d:\dke3\tooldke
+cd /d "%~dp0"
 echo Running custom_extract.py...
 python custom_extract.py
 echo.
-echo Running convert_and_add_averages.py...
-python convert_and_add_averages.py
+echo Running replace_img_sheet_images.py...
+python replace_img_sheet_images.py
 echo.
-echo Done! Both files updated.
+echo Done! All files updated!
 pause
