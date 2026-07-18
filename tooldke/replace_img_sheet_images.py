@@ -20,6 +20,12 @@ shutil.copy(REFERENCE_FILE, OUTPUT_FILE)
 data_wb = openpyxl.load_workbook(DATA_FILE)
 output_wb = openpyxl.load_workbook(OUTPUT_FILE)
 
+# Delete extra sheets (Sheet1, Sheet2, Sheet3) from the output file
+for sheet_name in ["Sheet1", "Sheet2", "Sheet3"]:
+    if sheet_name in output_wb.sheetnames:
+        del output_wb[sheet_name]
+        print(f"Deleted extra sheet: {sheet_name}")
+
 # Step 3: Copy all data sheets from data_wb to output_wb (skip any "img" sheet in data_wb)
 for sheet_name in data_wb.sheetnames:
     if sheet_name == "img":
